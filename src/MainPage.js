@@ -28,6 +28,7 @@ import Button from '../components/uis/Button';
 import RNFetchBlob from 'rn-fetch-blob';
 import {scale, verticalScale, moderateScale} from 'react-native-size-matters';
 import {request, PERMISSIONS, check, RESULTS} from 'react-native-permissions';
+import Waveform from './Waveform';
 
 const screenWidth = Dimensions.get('screen').width;
 
@@ -67,6 +68,8 @@ class MainPage extends Component {
       noisethreshold: thresholdValue,
       audioDataHistory: [], // Initialize an empty array for storing audio data history
       deviceName: '',
+      wave: [],
+      lastWaveformUpdateTime: Date.now(),
     };
 
     this.audioRecorderPlayer = new AudioRecorderPlayer();
@@ -192,6 +195,7 @@ class MainPage extends Component {
             threshold : {this.state.noisethreshold} DB
           </Text>
           <Text style={styles.titleTxt}>Noise Detector</Text>
+          <Waveform wave={this.state.wave} />
           <Text style={styles.txtRecordCounter}>{this.state.recordTime}</Text>
           <View style={styles.viewRecorder}>
             <View style={styles.recordBtnWrapper}>
@@ -409,6 +413,8 @@ class MainPage extends Component {
       OutputFormatAndroid: OutputFormatAndroidType.AAC_ADTS,
     };
 
+    this.setState({wave: []});
+
     console.log('audioSet', audioSet);
     const meteringEnabled = true;
     const uri = await this.audioRecorderPlayer.startRecorder(
@@ -419,6 +425,7 @@ class MainPage extends Component {
     this.setState({noiseData: []}), // Clear the noiseData array
       this.audioRecorderPlayer.addRecordBackListener(e => {
         console.log('record-back', e);
+        console.log(this.state.wave);
 
         this.setState({
           recordSecs: e.currentPosition,
@@ -428,6 +435,11 @@ class MainPage extends Component {
           ),
           currentDB: e.currentMetering,
         });
+
+        const newWaveValue = this.state.recordDb;
+        this.setState(prevState => ({
+          wave: [...prevState.wave, newWaveValue],
+        }));
         if (e.currentMetering > this.state.noisethreshold) {
           // Change background color to red and add to realTimeValues
           this.setState(

@@ -1,0 +1,595 @@
+import React, {useState, useEffect} from 'react';
+import {
+  Dimensions,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  ScrollView,
+  FlatList,
+  Image,
+  TextInput,
+  BackHandler,
+  Alert,
+  Button,
+} from 'react-native';
+import AudioRecorderPlayer, {
+  AVEncoderAudioQualityIOSType,
+  AVEncodingOption,
+  AudioEncoderAndroidType,
+  AudioSourceAndroidType,
+  OutputFormatAndroidType,
+} from 'react-native-audio-recorder-player';
+import RNFetchBlob from 'rn-fetch-blob';
+import {scale, verticalScale, moderateScale} from 'react-native-size-matters';
+import {request, PERMISSIONS, check, RESULTS} from 'react-native-permissions';
+
+const screenWidth = Dimensions.get('screen').width;
+
+const MainPage = ({route, navigation}) => {
+  const [recordSecs, setRecordSecs] = useState(0);
+  const [recordDb, setRecordDb] = useState(0);
+  const [recordTime, setRecordTime] = useState('00:00:00');
+  const [currentDB, setCurrentDB] = useState('-160');
+  const [currentPositionSec, setCurrentPositionSec] = useState(0);
+  const [currentMeteringSec, setCurrentMeteringSec] = useState(0);
+  const [currentDurationSec, setCurrentDurationSec] = useState(0);
+  const [playTime, setPlayTime] = useState('00:00:00');
+  const [duration, setDuration] = useState('00:00:00');
+  const [setQuite, setSetQuite] = useState(true);
+  const [setNormal, setSetNormal] = useState(false);
+  const [setLoud, setSetLoud] = useState(false);
+  const [backgroundColor, setBackgroundColor] = useState('white');
+  const [noiseData, setNoiseData] = useState([]);
+  const [noisethreshold, setNoisethreshold] = useState(
+    route.params?.noisethreshold || -6,
+  );
+  const [audioDataHistory, setAudioDataHistory] = useState([]);
+  const [deviceName, setDeviceName] = useState('');
+
+  const audioRecorderPlayer = new AudioRecorderPlayer();
+  audioRecorderPlayer.setSubscriptionDuration(0.1); // optional. Default is 0.5
+
+  const dirs = RNFetchBlob.fs.dirs;
+  const path = Platform.select({
+    ios: undefined,
+    android: undefined,
+    // ios: 'https://firebasestorage.googleapis.com/v0/b/cooni-ebee8.appspot.com/o/test-audio.mp3?alt=media&token=d05a2150-2e52-4a2e-9c8c-d906450be20b',
+    // ios: 'https://staging.media.ensembl.fr/original/uploads/26403543-c7d0-4d44-82c2-eb8364c614d0',
+    // ios: 'hello.m4a',
+    // android: `${dirs.CacheDir}/hello.mp3`,
+  });
+
+  const handleBackPress = () => {
+    Alert.alert(
+      'Exit App',
+      'Are you sure you want to exit?',
+      [
+        {text: 'Cancel', style: 'cancel'},
+        {text: 'Exit', onPress: () => BackHandler.exitApp()},
+      ],
+      {cancelable: false},
+    );
+    return true; // Prevent default behavior
+  };
+
+  const handleInputChange = text => {
+    setDeviceName(text);
+  };
+
+  const checkPermissions = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        const storageWriteStatus = await request(
+          PERMISSIONS.ANDROID.WRITE_EXTERNAL_STORAGE,
+        );
+        const storageReadStatus = await request(
+          PERMISSIONS.ANDROID.READ_EXTERNAL_STORAGE,
+        );
+        const recordAudioStatus = await request(
+          PERMISSIONS.ANDROID.RECORD_AUDIO,
+        );
+
+        console.log('Storage Write Permission:', storageWriteStatus);
+        console.log('Storage Read Permission:', storageReadStatus);
+        console.log('Record Audio Permission:', recordAudioStatus);
+
+        if (
+          storageWriteStatus === RESULTS.GRANTED &&
+          storageReadStatus === RESULTS.GRANTED &&
+          recordAudioStatus === RESULTS.GRANTED
+        ) {
+          console.log('All required permissions granted');
+        } else {
+          console.log('Not all required permissions granted');
+        }
+      } catch (error) {
+        console.error('Error requesting permissions:', error);
+      }
+    }
+  };
+
+  useEffect(() => {
+    BackHandler.addEventListener('hardwareBackPress', handleBackPress);
+
+    return () => {
+      BackHandler.removeEventListener('hardwareBackPress', handleBackPress);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (route.params?.noisethreshold !== noisethreshold) {
+      setNoisethreshold(route.params?.noisethreshold || -6);
+    }
+  }, [route.params?.noisethreshold]);
+
+  const onStatusPress = e => {
+    const touchX = e.nativeEvent.locationX;
+    console.log(`touchX: ${touchX}`);
+
+    const touchY = e.nativeEvent.locationY;
+    console.log(`touchX: ${touchY}`);
+
+    let playWidth =
+      (currentPositionSec / currentDurationSec) *
+      (screenWidth - moderateScale(56));
+
+    if (!playWidth) {
+      playWidth = 0;
+    }
+
+    const currentPosition = Math.round(currentPositionSec);
+    const currentMetering = Math.round(currentMeteringSec);
+
+    if (playWidth && playWidth < touchX) {
+      const addSecs = Math.round(currentPosition + 1000);
+      audioRecorderPlayer.seekToPlayer(addSecs);
+      console.log(`addSecs: ${addSecs}`);
+    } else {
+      const subSecs = Math.round(currentPosition - 1000);
+      audioRecorderPlayer.seekToPlayer(subSecs);
+      console.log(`subSecs: ${subSecs}`);
+    }
+  };
+
+  const onStartRecord = async () => {
+    checkPermissions();
+
+    const audioSet = {
+      AudioEncoderAndroid: AudioEncoderAndroidType.AAC,
+      AudioSourceAndroid: AudioSourceAndroidType.MIC,
+      AVEncoderAudioQualityKeyIOS: AVEncoderAudioQualityIOSType.high,
+      AVNumberOfChannelsKeyIOS: 2,
+      AVFormatIDKeyIOS: AVEncodingOption.aac,
+      OutputFormatAndroid: OutputFormatAndroidType.AAC_ADTS,
+    };
+
+    console.log('audioSet', audioSet);
+    const meteringEnabled = true;
+    const uri = await audioRecorderPlayer.startRecorder(
+      path,
+      audioSet,
+      meteringEnabled,
+    );
+    setNoiseData([]); // Clear the noiseData array
+    audioRecorderPlayer.addRecordBackListener(e => {
+      console.log('record-back', e);
+
+      setRecordSecs(e.currentPosition);
+      setRecordDb(e.currentMetering);
+      setRecordTime(audioRecorderPlayer.mmssss(Math.floor(e.currentPosition)));
+      setCurrentDB(e.currentMetering);
+      if (e.currentMetering > noisethreshold) {
+        // Change background color to red and add to realTimeValues
+        setBackgroundColor('red');
+        setNoiseData([
+          ...noiseData,
+          audioRecorderPlayer.mmssss(Math.floor(e.currentPosition)),
+        ]);
+        setTimeout(() => {
+          setBackgroundColor('white');
+        }, 300);
+      }
+    });
+    console.log(`uri: ${uri}`);
+  };
+
+  const onPauseRecord = async () => {
+    try {
+      const r = await audioRecorderPlayer.pauseRecorder();
+      console.log(r);
+    } catch (err) {
+      console.log('pauseRecord', err);
+    }
+  };
+
+  const onResumeRecord = async () => {
+    await audioRecorderPlayer.resumeRecorder();
+  };
+
+  const onStopRecord = async () => {
+    try {
+      const result = await audioRecorderPlayer.stopRecorder();
+      audioRecorderPlayer.removeRecordBackListener();
+
+      const recordedDuration = audioRecorderPlayer.mmssss(
+        Math.floor(recordSecs),
+      );
+
+      // Construct the data object to be passed to Settings screen
+      const newAudioData = {
+        DeviceName: deviceName,
+        recordedDuration: recordTime,
+        noiseData: noiseData,
+      };
+      setAudioDataHistory([...audioDataHistory, newAudioData]);
+      setRecordSecs(0);
+      setPlayTime('00:00:00');
+      setDuration(recordedDuration);
+      setRecordTime('00:00:00');
+
+      console.log(result);
+    } catch (error) {
+      console.error('Error stopping recorder:', error);
+    }
+  };
+
+  const onStartPlay = async () => {
+    console.log('onStartPlay', path);
+
+    try {
+      const msg = await audioRecorderPlayer.startPlayer(path);
+
+      const volume = await audioRecorderPlayer.setVolume(1.0);
+      console.log(`path: ${msg}`, `volume: ${volume}`);
+
+      audioRecorderPlayer.addPlayBackListener(e => {
+        console.log('playBackListener', e);
+        setCurrentPositionSec(e.currentPosition);
+        setCurrentDurationSec(e.duration);
+        setCurrentMeteringSec(e.currentMetering);
+        setPlayTime(audioRecorderPlayer.mmssss(Math.floor(e.currentPosition)));
+        setDuration(audioRecorderPlayer.mmssss(Math.floor(e.duration)));
+      });
+    } catch (err) {
+      console.log('startPlayer error', err);
+    }
+  };
+
+  const onPausePlay = async () => {
+    await audioRecorderPlayer.pausePlayer();
+  };
+
+  const onResumePlay = async () => {
+    await audioRecorderPlayer.resumePlayer();
+  };
+
+  const onStopPlay = () => {
+    console.log('onStopPlay');
+    audioRecorderPlayer.stopPlayer();
+    audioRecorderPlayer.removePlayBackListener();
+    setPlayTime('00:00:00');
+    setCurrentPositionSec(0); // Reset playTime
+  };
+
+  let textColor = 'grey'; // Default text color
+  let playWidth =
+    (currentPositionSec / currentDurationSec) *
+    (screenWidth - moderateScale(56));
+
+  if (!playWidth) {
+    playWidth = 0;
+  }
+
+  if (setNormal) {
+    textColor = 'green';
+  } else if (setLoud) {
+    textColor = 'red';
+    setBackgroundColor('red');
+  }
+
+  return (
+    <SafeAreaView
+      style={[styles.container, {backgroundColor: backgroundColor}]}>
+      <TouchableOpacity
+        style={{
+          justifyContent: 'flex-end',
+          width: '100%',
+          alignItems: 'flex-end',
+          marginTop: verticalScale(12),
+          right: scale(12),
+        }}
+        onPress={() =>
+          navigation.navigate('Settings', {
+            audioDataHistory: audioDataHistory,
+          })
+        }>
+        <Image
+          source={require('./assets/gear.png')}
+          style={{
+            height: verticalScale(35),
+            width: scale(35),
+          }}
+        />
+      </TouchableOpacity>
+      <View style={styles.container2}>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            marginBottom: verticalScale(20),
+            justifyContent: 'flex-start',
+            padding: moderateScale(5),
+            width: '100%',
+            marginTop: verticalScale(5),
+          }}>
+          <Text style={{color: 'black', fontSize: scale(17)}}>
+            Device Name:
+          </Text>
+          <TextInput
+            style={{
+              width: scale(150),
+              borderBottomWidth: scale(2),
+              borderColor: 'grey',
+              marginHorizontal: scale(10),
+              textAlign: 'center',
+              textAlignVertical: 'center',
+              fontSize: scale(15),
+              color: 'black',
+            }}
+            placeholder="Servo motor"
+            value={deviceName} // Set the value of TextInput from state
+            onChangeText={handleInputChange}
+          />
+        </View>
+        <View style={{flexDirection: 'row'}}>
+          <Text style={styles.txtDB}>{currentDB} </Text>
+          <Text style={styles.txtDB}>DB</Text>
+        </View>
+        <Text style={styles.txtofdbstatus}>
+          threshold : {noisethreshold} DB
+        </Text>
+        <Text style={styles.titleTxt}>Noise Detector</Text>
+        <Text style={styles.txtRecordCounter}>{recordTime}</Text>
+        <View style={styles.viewRecorder}>
+          <View style={styles.recordBtnWrapper}>
+            <Button
+              style={styles.btntesting}
+              onPress={() => onStartRecord()}
+              textStyle={styles.txttesting}
+              title="Start Testing"></Button>
+            <Button
+              style={[styles.btn, {marginLeft: scale(12)}]}
+              onPress={() => onPauseRecord()}
+              textStyle={styles.txt}
+              title="Pause"></Button>
+            <Button
+              style={[styles.btn, {marginLeft: scale(12)}]}
+              onPress={() => onResumeRecord()}
+              textStyle={styles.txt}
+              title="Resume"></Button>
+            <Button
+              style={[styles.btn, {marginLeft: scale(12)}]}
+              onPress={() => onStopRecord()}
+              textStyle={styles.txt}
+              title="Stop"></Button>
+          </View>
+          <Text
+            style={{
+              color: 'black',
+              marginTop: verticalScale(30),
+              fontSize: scale(20),
+            }}>
+            Noise Data
+          </Text>
+          {noiseData.length == 0 ? (
+            <Text
+              style={{
+                color: 'grey',
+                fontSize: scale(20),
+                padding: moderateScale(7),
+              }}>
+              no noise data fetched
+            </Text>
+          ) : (
+            <FlatList
+              style={{height: verticalScale(100)}}
+              data={noiseData}
+              renderItem={({item}) => {
+                return (
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      width: '100%',
+                      margin: moderateScale(5),
+                      padding: moderateScale(5),
+                      justifyContent: 'flex-start',
+                      backgroundColor: 'blue',
+                    }}>
+                    <Text
+                      style={{
+                        color: 'white',
+                        fontSize: scale(15),
+                        padding: moderateScale(5),
+                      }}>
+                      noise fetched at :
+                    </Text>
+                    <Text
+                      style={{
+                        color: 'red',
+                        fontSize: scale(15),
+                        padding: moderateScale(5),
+                      }}>
+                      {item}
+                    </Text>
+                  </View>
+                );
+              }}
+              keyExtractor={item => item.toString()}
+            />
+          )}
+        </View>
+        <View style={styles.viewPlayer}>
+          <TouchableOpacity
+            style={styles.viewBarWrapper}
+            onPress={onStatusPress}>
+            <View style={styles.viewBar}>
+              <View style={[styles.viewBarPlay, {width: playWidth}]} />
+            </View>
+          </TouchableOpacity>
+          <Text style={styles.txtCounter}>
+            {playTime} / {duration}
+          </Text>
+          <View style={styles.playBtnWrapper}>
+            <Button
+              style={styles.btnreplay}
+              onPress={() => onStartPlay()}
+              textStyle={styles.txtreplay}
+              title="RePlay Track"
+            />
+            <Button
+              style={[styles.btn, {marginLeft: scale(12)}]}
+              onPress={() => onPausePlay()}
+              textStyle={styles.txt}
+              title="Pause"
+            />
+            <Button
+              style={[styles.btn, {marginLeft: scale(12)}]}
+              onPress={() => onResumePlay()}
+              textStyle={styles.txt}
+              title="Resume"></Button>
+            <Button
+              style={[styles.btn, {marginLeft: scale(12)}]}
+              onPress={() => onStopPlay()}
+              textStyle={styles.txt}
+              title="Stop"
+            />
+          </View>
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+};
+
+export default MainPage;
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: 'white',
+  },
+
+  container2: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  titleTxt: {
+    marginTop: verticalScale(15),
+    color: 'black',
+    fontSize: scale(24),
+  },
+  txtDB: {
+    color: 'black',
+    fontSize: scale(35),
+    fontWeight: '600',
+  },
+  viewRecorder: {
+    marginTop: verticalScale(17),
+    width: '100%',
+    alignItems: 'center',
+  },
+  recordBtnWrapper: {
+    flexDirection: 'row',
+    width: '100%',
+    justifyContent: 'center',
+  },
+  viewPlayer: {
+    marginTop: verticalScale(17),
+    alignSelf: 'stretch',
+    alignItems: 'center',
+  },
+  viewBarWrapper: {
+    marginTop: verticalScale(17),
+    marginHorizontal: scale(28),
+    alignSelf: 'stretch',
+  },
+  viewBar: {
+    backgroundColor: 'grey',
+    height: verticalScale(4),
+    alignSelf: 'stretch',
+  },
+  viewBarPlay: {
+    backgroundColor: 'red',
+    height: verticalScale(4),
+    width: scale(0),
+  },
+  playStatusTxt: {
+    marginTop: verticalScale(8),
+    color: 'black',
+  },
+  playBtnWrapper: {
+    flexDirection: 'row',
+    marginTop: verticalScale(25),
+  },
+  btn: {
+    borderColor: 'gray',
+    borderWidth: scale(1),
+  },
+  btntesting: {
+    borderColor: 'grey',
+    borderWidth: scale(1),
+    backgroundColor: 'green',
+  },
+  btnreplay: {
+    borderColor: 'grey',
+    borderWidth: scale(1),
+    backgroundColor: 'orange',
+  },
+  txt: {
+    color: 'black',
+    fontSize: scale(14),
+    marginHorizontal: scale(8),
+    marginVertical: verticalScale(4),
+  },
+  txttesting: {
+    color: 'white',
+    fontSize: scale(14),
+    marginHorizontal: scale(8),
+    marginVertical: verticalScale(4),
+  },
+  txtreplay: {
+    color: 'white',
+    fontSize: scale(14),
+    marginHorizontal: scale(8),
+    marginVertical: verticalScale(4),
+  },
+  txtRecordCounter: {
+    marginTop: verticalScale(20),
+    color: 'red',
+    fontSize: scale(20),
+    textAlignVertical: 'center',
+    fontWeight: '200',
+    fontFamily: 'Helvetica Neue',
+    letterSpacing: scale(3),
+  },
+  txtofdbstatus: {
+    marginTop: verticalScale(1),
+    fontSize: scale(17),
+    textAlignVertical: 'center',
+    fontWeight: '200',
+    fontFamily: 'Helvetica Neue',
+    letterSpacing: scale(3),
+    color: 'grey',
+  },
+  txtCounter: {
+    marginTop: verticalScale(12),
+    color: 'red',
+    fontSize: scale(20),
+    textAlignVertical: 'center',
+    fontWeight: '200',
+    fontFamily: 'Helvetica Neue',
+    letterSpacing: scale(3),
+  },
+});
