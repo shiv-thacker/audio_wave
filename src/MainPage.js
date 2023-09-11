@@ -21,6 +21,8 @@ import {
   BackHandler,
   Alert,
   TextInput,
+  UIManager,
+  findNodeHandle,
 } from 'react-native';
 import React, {Component} from 'react';
 
@@ -49,6 +51,7 @@ class MainPage extends Component {
     super(props);
     const {route, navigation} = this.props;
     const thresholdValue = route.params?.noisethreshold || -6;
+    const maxValue = 50;
     this.state = {
       isLoggingIn: false,
       recordSecs: 0,
@@ -70,10 +73,11 @@ class MainPage extends Component {
       deviceName: '',
       wave: [],
       lastWaveformUpdateTime: Date.now(),
+      isRecording: false,
     };
 
     this.audioRecorderPlayer = new AudioRecorderPlayer();
-    this.audioRecorderPlayer.setSubscriptionDuration(0.1); // optional. Default is 0.5
+    this.audioRecorderPlayer.setSubscriptionDuration(0.3); // optional. Default is 0.5
   }
   handleBackPress = () => {
     Alert.alert(
@@ -110,6 +114,18 @@ class MainPage extends Component {
       });
     }
   }
+  componentDidUpdate(prevProps, prevState) {
+    if (prevState.isRecording !== this.state.isRecording) {
+      if (this.state.isRecording) {
+        this.startRecording();
+      } else {
+        this.stopRecording();
+      }
+    }
+
+    // Add other necessary logic for componentDidUpdate
+  }
+
   render() {
     const {route, navigation} = this.props;
     let textColor = 'grey'; // Default text color
@@ -158,44 +174,28 @@ class MainPage extends Component {
           />
         </TouchableOpacity>
         <View style={styles.container2}>
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              marginBottom: verticalScale(20),
-              justifyContent: 'flex-start',
-              padding: moderateScale(5),
-              width: '100%',
-              marginTop: verticalScale(5),
-            }}>
-            <Text style={{color: 'black', fontSize: scale(17)}}>
-              Device Name:
-            </Text>
-            <TextInput
-              style={{
-                width: scale(150),
-                borderBottomWidth: scale(2),
-                borderColor: 'grey',
-                marginHorizontal: scale(10),
-                textAlign: 'center',
-                textAlignVertical: 'center',
-                fontSize: scale(15),
-                color: 'black',
-              }}
-              placeholder="Servo motor"
-              value={this.state.deviceName} // Set the value of TextInput from state
-              onChangeText={this.handleInputChange}
-            />
-          </View>
           <View style={{flexDirection: 'row'}}>
             <Text style={styles.txtDB}>{this.state.currentDB} </Text>
             <Text style={styles.txtDB}>DB</Text>
           </View>
-          <Text style={styles.txtofdbstatus}>
-            threshold : {this.state.noisethreshold} DB
-          </Text>
-          <Text style={styles.titleTxt}>Noise Detector</Text>
-          <Waveform wave={this.state.wave} />
+
+          <View style={{flexDirection: 'row', alignItems: 'center'}}>
+            {this.state.wave.map((value, index) => {
+              const height = Math.max(0, Math.abs(value + 50)); // Calculate the height based on the value
+              return (
+                <View
+                  key={index}
+                  style={{
+                    width: 1, // Width of the vertical line
+                    height: height * 1.5, // Height based on the value
+                    backgroundColor: 'blue',
+                    marginHorizontal: moderateScale(1),
+                  }}
+                />
+              );
+            })}
+          </View>
+          {/* <Waveform wave={this.state.wave} /> */}
           <Text style={styles.txtRecordCounter}>{this.state.recordTime}</Text>
           <View style={styles.viewRecorder}>
             <View style={styles.recordBtnWrapper}>
