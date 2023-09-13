@@ -7,26 +7,18 @@ import AudioRecorderPlayer, {
 } from 'react-native-audio-recorder-player';
 import {
   Dimensions,
-  PermissionsAndroid,
   Platform,
   SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
-  Vibration,
-  ScrollView,
-  FlatList,
-  Image,
   BackHandler,
   Alert,
-  TextInput,
-  UIManager,
-  findNodeHandle,
+  Image,
 } from 'react-native';
 import React, {Component} from 'react';
 
-import Button from '../components/uis/Button';
 import RNFetchBlob from 'rn-fetch-blob';
 import {scale, verticalScale, moderateScale} from 'react-native-size-matters';
 import {request, PERMISSIONS, check, RESULTS} from 'react-native-permissions';
@@ -50,12 +42,9 @@ class MainPage extends Component {
   constructor(props) {
     super(props);
     const {route, navigation} = this.props;
-    const thresholdValue = route.params?.noisethreshold || -6;
     const maxValue = 50;
     this.state = {
-      isLoggingIn: false,
       recordSecs: 0,
-      recordDb: 0,
       recordTime: '00:00:00',
       currentDB: '-160',
       currentPositionSec: 0,
@@ -63,21 +52,23 @@ class MainPage extends Component {
       currentDurationSec: 0,
       playTime: '00:00:00',
       duration: '00:00:00',
-      setQuite: true,
-      setNormal: false,
-      setLoud: false,
-      backgroundColor: 'white',
-      noiseData: [],
-      noisethreshold: thresholdValue,
-      audioDataHistory: [], // Initialize an empty array for storing audio data history
-      deviceName: '',
       wave: [],
-      lastWaveformUpdateTime: Date.now(),
-      isRecording: false,
+      intervalId: null,
+      seconds: 0,
+      isRunning: false,
+      progressbarwidth: 0,
+      disableplay: true,
+      disablerecord: false,
+      disablepause: true,
+      disablestop: true,
+      disableretake: false,
+      disableplaypause: true,
+
+      disableupload: true,
     };
 
     this.audioRecorderPlayer = new AudioRecorderPlayer();
-    this.audioRecorderPlayer.setSubscriptionDuration(0.3); // optional. Default is 0.5
+    this.audioRecorderPlayer.setSubscriptionDuration(0.3); // fetch audio volume in every 30 milisecond
   }
   handleBackPress = () => {
     Alert.alert(
@@ -89,12 +80,7 @@ class MainPage extends Component {
       ],
       {cancelable: false},
     );
-    return true; // Prevent default behavior
-  };
-  handleInputChange = text => {
-    this.setState({
-      deviceName: text, // Update the state when the TextInput value changes
-    });
+    return true;
   };
 
   componentDidMount() {
@@ -104,274 +90,143 @@ class MainPage extends Component {
   componentWillUnmount() {
     BackHandler.removeEventListener('hardwareBackPress', this.handleBackPress);
   }
-  componentDidUpdate(prevProps) {
-    if (
-      prevProps.route.params?.noisethreshold !==
-      this.props.route.params?.noisethreshold
-    ) {
-      this.setState({
-        noisethreshold: this.props.route.params?.noisethreshold || -6,
-      });
-    }
-  }
-  componentDidUpdate(prevProps, prevState) {
-    if (prevState.isRecording !== this.state.isRecording) {
-      if (this.state.isRecording) {
-        this.startRecording();
-      } else {
-        this.stopRecording();
-      }
-    }
-
-    // Add other necessary logic for componentDidUpdate
-  }
 
   render() {
-    const {route, navigation} = this.props;
-    let textColor = 'grey'; // Default text color
-    let backgroundColor = 'white';
-
-    if (this.state.setNormal) {
-      textColor = 'green';
-    } else if (this.state.setLoud) {
-      textColor = 'red';
-      backgroundColor = 'red';
-    }
-
-    let playWidth =
-      (this.state.currentPositionSec / this.state.currentDurationSec) *
-      (screenWidth - moderateScale(56));
+    let playWidth = this.state.disableplay
+      ? 0
+      : (this.state.currentPositionSec / this.state.currentDurationSec) *
+        (this.state.progressbarwidth / 83);
 
     if (!playWidth) {
       playWidth = 0;
     }
 
     return (
-      <SafeAreaView
-        style={[
-          styles.container,
-          {backgroundColor: this.state.backgroundColor},
-        ]}>
-        <TouchableOpacity
-          style={{
-            justifyContent: 'flex-end',
-            width: '100%',
-            alignItems: 'flex-end',
-            marginTop: verticalScale(12),
-            right: scale(12),
-          }}
-          onPress={() =>
-            navigation.navigate('Settings', {
-              audioDataHistory: this.state.audioDataHistory, // Pass the array of audio data history
-            })
-          }>
-          <Image
-            source={require('./assets/gear.png')}
-            style={{
-              height: verticalScale(35),
-              width: scale(35),
-            }}
-          />
-        </TouchableOpacity>
+      <SafeAreaView style={[styles.container, {backgroundColor: 'black'}]}>
         <View style={styles.container2}>
-          <View style={{flexDirection: 'row'}}>
-            <Text style={styles.txtDB}>{this.state.currentDB} </Text>
-            <Text style={styles.txtDB}>DB</Text>
-          </View>
-
-          <View style={{flexDirection: 'row', alignItems: 'center'}}>
-            {this.state.wave.map((value, index) => {
-              const height = Math.max(0, Math.abs(value + 50)); // Calculate the height based on the value
-              return (
-                <View
-                  key={index}
-                  style={{
-                    width: 1, // Width of the vertical line
-                    height: height * 1.5, // Height based on the value
-                    backgroundColor: 'blue',
-                    marginHorizontal: moderateScale(1),
-                  }}
-                />
-              );
-            })}
-          </View>
-          {/* <Waveform wave={this.state.wave} /> */}
-          <Text style={styles.txtRecordCounter}>{this.state.recordTime}</Text>
+          <View style={{flexDirection: 'row'}}></View>
+          <Text style={{color: 'white', fontSize: scale(15)}}>
+            Record in silence zone
+          </Text>
+          <Text style={styles.txtRecordCounter}>
+            {Math.floor(20 - this.state.recordSecs / 1000)}
+          </Text>
           <View style={styles.viewRecorder}>
             <View style={styles.recordBtnWrapper}>
-              <Button
-                style={styles.btntesting}
-                onPress={this.onStartRecord}
-                textStyle={styles.txttesting}>
-                Start Testing
-              </Button>
-              <Button
-                style={[
-                  styles.btn,
-                  {
-                    marginLeft: scale(12),
-                  },
-                ]}
-                onPress={this.onPauseRecord}
-                textStyle={styles.txt}>
-                Pause
-              </Button>
-              <Button
-                style={[
-                  styles.btn,
-                  {
-                    marginLeft: scale(12),
-                  },
-                ]}
-                onPress={this.onResumeRecord}
-                textStyle={styles.txt}>
-                Resume
-              </Button>
-              <Button
-                style={[styles.btn, {marginLeft: scale(12)}]}
-                onPress={this.onStopRecord}
-                textStyle={styles.txt}>
-                Stop
-              </Button>
-            </View>
-            <Text
-              style={{
-                color: 'black',
-                marginTop: verticalScale(30),
-                fontSize: scale(20),
-              }}>
-              Noise Data
-            </Text>
-            {this.state.noiseData.length == 0 ? (
-              <Text
-                style={{
-                  color: 'grey',
-                  fontSize: scale(20),
-                  padding: moderateScale(7),
-                }}>
-                no noise data fetched
-              </Text>
-            ) : (
-              <FlatList
-                style={{height: verticalScale(100)}}
-                data={this.state.noiseData}
-                renderItem={({item}) => {
-                  return (
-                    <View
-                      style={{
-                        flexDirection: 'row',
-                        width: '100%',
-                        margin: moderateScale(5),
-                        padding: moderateScale(5),
-                        justifyContent: 'flex-start',
-                        backgroundColor: 'blue',
-                      }}>
-                      <Text
-                        style={{
-                          color: 'white',
-                          fontSize: scale(15),
-                          padding: moderateScale(5),
-                        }}>
-                        noise fetched at :
-                      </Text>
-                      <Text
-                        style={{
-                          color: 'red',
-                          fontSize: scale(15),
-                          padding: moderateScale(5),
-                        }}>
-                        {item}
-                      </Text>
-                    </View>
-                  );
+              <TouchableOpacity
+                style={[styles.savebtn, {marginRight: scale(14)}]}
+                onPress={() => {
+                  this.onRetakeRecord();
                 }}
-                keyExtractor={item => item.toString()}
-              />
-            )}
-          </View>
-          <View style={styles.viewPlayer}>
-            <TouchableOpacity
-              style={styles.viewBarWrapper}
-              onPress={this.onStatusPress}>
-              <View style={styles.viewBar}>
-                <View style={[styles.viewBarPlay, {width: playWidth}]} />
-              </View>
-            </TouchableOpacity>
-            <Text style={styles.txtCounter}>
-              {this.state.playTime} / {this.state.duration}
-            </Text>
-            <View style={styles.playBtnWrapper}>
-              <Button
-                style={styles.btnreplay}
-                onPress={this.onStartPlay}
-                textStyle={styles.txtreplay}>
-                RePlay Track
-              </Button>
-              <Button
+                disabled={this.state.disableretake}>
+                <Image
+                  source={require('./assets/reload.png')}
+                  style={{
+                    resizeMode: 'contain',
+                    aspectRatio: 1,
+                    width: 30,
+                    height: 30,
+                  }}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.recordbtn}
+                onPress={() => {
+                  console.log(this.state.wave, this.state.disablepause);
+                  if (this.state.disablepause) {
+                    if (this.state.recordSecs === 0) {
+                      this.onStartRecord();
+                    } else {
+                      this.onResumeRecord();
+                    }
+                  } else {
+                    this.onPauseRecord();
+                  }
+                }}
+                disabled={false}>
+                {this.state.disablepause ? null : (
+                  <Image
+                    source={require('./assets/pause.png')}
+                    style={{
+                      resizeMode: 'contain',
+                      aspectRatio: 1,
+                      width: 30,
+                      height: 30,
+                    }}
+                  />
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
                 style={[
-                  styles.btn,
+                  styles.savebtn,
                   {
-                    marginLeft: scale(12),
+                    marginLeft: scale(14),
+                    backgroundColor: this.state.disablestop ? 'grey' : 'white',
                   },
                 ]}
-                onPress={this.onPausePlay}
-                textStyle={styles.txt}>
-                Pause
-              </Button>
-              <Button
-                style={[
-                  styles.btn,
-                  {
-                    marginLeft: scale(12),
-                  },
-                ]}
-                onPress={this.onResumePlay}
-                textStyle={styles.txt}>
-                Resume
-              </Button>
-              <Button
-                style={[
-                  styles.btn,
-                  {
-                    marginLeft: scale(12),
-                  },
-                ]}
-                onPress={this.onStopPlay}
-                textStyle={styles.txt}>
-                Stop
-              </Button>
+                onPress={this.onStopRecord}
+                disabled={this.state.disablestop}>
+                <Image
+                  source={require('./assets/check.png')}
+                  style={{
+                    resizeMode: 'contain',
+                    aspectRatio: 1,
+                    width: 30,
+                    height: 30,
+                  }}
+                />
+              </TouchableOpacity>
             </View>
           </View>
+
+          <View style={styles.playaudio}>
+            <TouchableOpacity
+              style={[
+                styles.playbtn,
+                {backgroundColor: this.state.disableplay ? 'grey' : 'blue'},
+              ]}
+              onPress={() => {
+                this.onStartPlay();
+              }}
+              disabled={this.state.disableplay}>
+              <Image
+                source={require('./assets/play.png')}
+                style={{
+                  resizeMode: 'contain',
+                  aspectRatio: 1,
+                  width: 25,
+                  height: 25,
+                }}
+              />
+            </TouchableOpacity>
+            <View>
+              <View style={styles.viewPlayer}>
+                <TouchableOpacity style={styles.viewBarWrapper}>
+                  <View style={styles.viewBar}>
+                    <View style={[styles.viewBarPlay, {width: playWidth}]} />
+                  </View>
+                </TouchableOpacity>
+                <Waveform wave={this.state.wave} />
+              </View>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[
+              styles.uploadbtn,
+              {backgroundColor: this.state.disableplay ? 'grey' : 'green'},
+            ]}
+            onPress={() => {
+              Alert.alert(`path : ${this.state.msg}`);
+            }}
+            disabled={this.state.disableplay}>
+            <Text style={styles.uploadtxt}>upload</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
-
-  onStatusPress = e => {
-    const touchX = e.nativeEvent.locationX;
-    console.log(`touchX: ${touchX}`);
-
-    const touchY = e.nativeEvent.locationY;
-    console.log(`touchX: ${touchY}`);
-
-    const playWidth =
-      (this.state.currentPositionSec / this.state.currentDurationSec) *
-      (screenWidth - 56);
-    console.log(`currentPlayWidth: ${playWidth}`);
-
-    const currentPosition = Math.round(this.state.currentPositionSec);
-    const currentMetering = Math.round(this.state.currentMeteringSec);
-
-    if (playWidth && playWidth < touchX) {
-      const addSecs = Math.round(currentPosition + 1000);
-      this.audioRecorderPlayer.seekToPlayer(addSecs);
-      console.log(`addSecs: ${addSecs}`);
-    } else {
-      const subSecs = Math.round(currentPosition - 1000);
-      this.audioRecorderPlayer.seekToPlayer(subSecs);
-      console.log(`subSecs: ${subSecs}`);
-    }
-  };
 
   onStartRecord = async () => {
     if (Platform.OS === 'android') {
@@ -403,7 +258,13 @@ class MainPage extends Component {
         console.error('Error requesting permissions:', error);
       }
     }
-
+    this.setState({
+      disableplay: true,
+      disablepause: false,
+      disablestop: false,
+      disableplaypause: true,
+      disableupload: true,
+    });
     const audioSet = {
       AudioEncoderAndroid: AudioEncoderAndroidType.AAC,
       AudioSourceAndroid: AudioSourceAndroidType.MIC,
@@ -422,42 +283,24 @@ class MainPage extends Component {
       audioSet,
       meteringEnabled,
     );
-    this.setState({noiseData: []}), // Clear the noiseData array
-      this.audioRecorderPlayer.addRecordBackListener(e => {
-        console.log('record-back', e);
-        console.log(this.state.wave);
+    this.audioRecorderPlayer.addRecordBackListener(e => {
+      console.log('record-back', e);
+      console.log(this.state.wave);
 
-        this.setState({
-          recordSecs: e.currentPosition,
-          recordDb: e.currentMetering,
-          recordTime: this.audioRecorderPlayer.mmssss(
-            Math.floor(e.currentPosition),
-          ),
-          currentDB: e.currentMetering,
-        });
+      this.setState({
+        recordSecs: e.currentPosition,
 
-        const newWaveValue = this.state.recordDb;
-        this.setState(prevState => ({
-          wave: [...prevState.wave, newWaveValue],
-        }));
-        if (e.currentMetering > this.state.noisethreshold) {
-          // Change background color to red and add to realTimeValues
-          this.setState(
-            prevState => ({
-              backgroundColor: 'red',
-              noiseData: [...prevState.noiseData, this.state.recordTime],
-            }),
-            () => {
-              // Set a timer to revert the background color after 1 second
-              setTimeout(() => {
-                this.setState({
-                  backgroundColor: 'white',
-                });
-              }, 300);
-            },
-          );
-        }
+        currentDB: e.currentMetering,
       });
+
+      const newWaveValue = this.state.currentDB;
+      if (this.state.recordSecs === 20000 || this.state.recordSecs >= 20000) {
+        this.onStopRecord();
+      }
+      this.setState(prevState => ({
+        wave: [...prevState.wave, newWaveValue],
+      }));
+    });
     console.log(`uri: ${uri}`);
   };
 
@@ -468,10 +311,18 @@ class MainPage extends Component {
     } catch (err) {
       console.log('pauseRecord', err);
     }
+
+    this.setState({disablepause: true});
   };
 
   onResumeRecord = async () => {
     await this.audioRecorderPlayer.resumeRecorder();
+    this.setState({disableplay: true, disablepause: false});
+  };
+
+  onRetakeRecord = async () => {
+    this.onStopRecord();
+    this.onStartRecord();
   };
 
   onStopRecord = async () => {
@@ -481,21 +332,20 @@ class MainPage extends Component {
     const recordedDuration = this.audioRecorderPlayer.mmssss(
       Math.floor(this.state.recordSecs),
     );
-
-    // Construct the data object to be passed to Settings screen
-    const newAudioData = {
-      DeviceName: this.state.deviceName,
-      recordedDuration: this.state.recordTime,
-      noiseData: this.state.noiseData,
-    };
     this.setState(prevState => ({
-      audioDataHistory: [...prevState.audioDataHistory, newAudioData],
+      progressbarwidth: prevState.recordSecs,
+    }));
+
+    this.setState(prevState => ({
       recordSecs: 0,
       playTime: '00:00:00',
       duration: recordedDuration,
-      recordTime: '00:00:00',
+      disableplay: false,
+      disablepause: true,
+      disablestop: true,
+      disableplaypause: true,
+      disableupload: false,
     }));
-
     console.log(result);
   };
 
@@ -504,14 +354,14 @@ class MainPage extends Component {
 
     try {
       const msg = await this.audioRecorderPlayer.startPlayer(this.path);
-
+      this.setState({msg});
       //? Default path
       // const msg = await this.audioRecorderPlayer.startPlayer();
       const volume = await this.audioRecorderPlayer.setVolume(1.0);
       console.log(`path: ${msg}`, `volume: ${volume}`);
 
       this.audioRecorderPlayer.addPlayBackListener(e => {
-        console.log('playBackListener', e);
+        console.log('playBackListener', e.currentPosition);
         this.setState({
           currentPositionSec: e.currentPosition,
           currentDurationSec: e.duration,
@@ -520,6 +370,7 @@ class MainPage extends Component {
             Math.floor(e.currentPosition),
           ),
           duration: this.audioRecorderPlayer.mmssss(Math.floor(e.duration)),
+          disableplaypause: false,
         });
       });
     } catch (err) {
@@ -528,11 +379,21 @@ class MainPage extends Component {
   };
 
   onPausePlay = async () => {
-    await this.audioRecorderPlayer.pausePlayer();
+    try {
+      await this.audioRecorderPlayer.pausePlayer();
+      this.setState({disableplaypause: true});
+    } catch (err) {
+      console.log('startPlayer error', err);
+    }
   };
 
   onResumePlay = async () => {
-    await this.audioRecorderPlayer.resumePlayer();
+    try {
+      await this.audioRecorderPlayer.startPlayer(this.path);
+      this.setState({disableplaypause: false});
+    } catch (err) {
+      console.log('startPlayer error', err);
+    }
   };
 
   onStopPlay = async () => {
@@ -549,6 +410,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: 'white',
+    justifyContent: 'center',
   },
 
   container2: {
@@ -556,25 +418,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  titleTxt: {
-    marginTop: verticalScale(15),
-    color: 'black',
-    fontSize: scale(24),
-  },
-  txtDB: {
-    color: 'black',
-    fontSize: scale(35),
-    fontWeight: '600',
-  },
   viewRecorder: {
-    marginTop: verticalScale(17),
     width: '100%',
-    alignItems: 'center',
   },
   recordBtnWrapper: {
     flexDirection: 'row',
     width: '100%',
     justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: verticalScale(8),
   },
   viewPlayer: {
     marginTop: verticalScale(17),
@@ -584,83 +436,84 @@ const styles = StyleSheet.create({
   viewBarWrapper: {
     marginTop: verticalScale(17),
     marginHorizontal: scale(28),
-    alignSelf: 'stretch',
+    width: moderateScale(242.89),
   },
   viewBar: {
-    backgroundColor: 'grey',
+    backgroundColor: 'black',
     height: verticalScale(4),
     alignSelf: 'stretch',
+    width: moderateScale(242.89),
   },
   viewBarPlay: {
     backgroundColor: 'red',
     height: verticalScale(4),
     width: scale(0),
   },
-  playStatusTxt: {
-    marginTop: verticalScale(8),
-    color: 'black',
+
+  recordbtn: {
+    borderColor: 'white',
+    borderWidth: scale(3),
+    backgroundColor: 'red',
+    height: verticalScale(45),
+    width: verticalScale(45),
+    borderRadius: scale(23),
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  playBtnWrapper: {
-    flexDirection: 'row',
-    marginTop: verticalScale(25),
-  },
-  btn: {
-    borderColor: 'gray',
+  savebtn: {
+    borderColor: 'white',
     borderWidth: scale(1),
+    backgroundColor: 'white',
+    height: verticalScale(45),
+    width: verticalScale(45),
+    borderRadius: scale(23),
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  btntesting: {
+  playbtn: {
     borderColor: 'grey',
     borderWidth: scale(1),
-    backgroundColor: 'green',
+    backgroundColor: 'blue',
+    height: verticalScale(45),
+    width: verticalScale(45),
+    borderRadius: scale(23),
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  btnreplay: {
-    borderColor: 'grey',
-    borderWidth: scale(1),
-    backgroundColor: 'orange',
-  },
+
   txt: {
     color: 'black',
     fontSize: scale(14),
     marginHorizontal: scale(8),
     marginVertical: verticalScale(4),
   },
-  txttesting: {
-    color: 'white',
-    fontSize: scale(14),
-    marginHorizontal: scale(8),
-    marginVertical: verticalScale(4),
-  },
-  txtreplay: {
-    color: 'white',
-    fontSize: scale(14),
-    marginHorizontal: scale(8),
-    marginVertical: verticalScale(4),
-  },
+
   txtRecordCounter: {
-    marginTop: verticalScale(20),
+    marginTop: verticalScale(5),
     color: 'red',
-    fontSize: scale(20),
+    fontSize: scale(15),
     textAlignVertical: 'center',
     fontWeight: '200',
     fontFamily: 'Helvetica Neue',
     letterSpacing: scale(3),
   },
-  txtofdbstatus: {
-    marginTop: verticalScale(1),
-    fontSize: scale(17),
-    textAlignVertical: 'center',
-    fontWeight: '200',
-    fontFamily: 'Helvetica Neue',
-    letterSpacing: scale(3),
-    color: 'grey',
+  playaudio: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
   },
-  txtCounter: {
-    marginTop: verticalScale(12),
-    color: 'red',
-    fontSize: scale(20),
-    textAlignVertical: 'center',
-    fontWeight: '200',
-    fontFamily: 'Helvetica Neue',
-    letterSpacing: scale(3),
+  uploadbtn: {
+    width: moderateScale(200),
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: verticalScale(27),
+    borderRadius: scale(6),
+    marginTop: verticalScale(40),
+  },
+  uploadtxt: {
+    color: 'white',
+    padding: moderateScale(6),
+    fontSize: scale(13),
+    textAlign: 'center',
   },
 });
